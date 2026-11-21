@@ -1,0 +1,48 @@
+name: Build Android APK / AAB
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.7'
+          cache-provider: basic
+      - name: Run Gradle Build
+        run: |
+          set -o pipefail
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee build-output.log
+          else
+            gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee build-output.log
+          fi
+      - name: Publish Release
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob globstar
+          FILES=(app/build/outputs/apk/**/*.apk app/build/outputs/bundle/**/*.aab)
+          if [ ${#FILES[@]} -gt 0 ]; then
+            gh release create "v1.0-${{ github.run_number }}" "${FILES[@]}" --title "v1.0-${{ github.run_number }}" --notes "Built with Wevlo"
+          fi
+      - name: Upload Failure Log
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f "build-output.log" ]; then
+            gh release delete log-latest -y || true
+            gh release create log-latest build-output.log --prerelease --title "Latest Build Log" --notes "Build log" || true
+          fi
